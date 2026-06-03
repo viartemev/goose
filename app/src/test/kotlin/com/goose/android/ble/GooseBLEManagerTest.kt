@@ -97,6 +97,7 @@ class GooseBLEManagerTest {
     @Test
     fun onConnected_stateBecomesDiscovering() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
+        every { gatt.discoverServices() } returns true
         gattCallback().onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
         assertEquals("discovering", manager.connectionState.value)
     }
@@ -104,8 +105,18 @@ class GooseBLEManagerTest {
     @Test
     fun onConnected_callsDiscoverServices() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
+        every { gatt.discoverServices() } returns true
         gattCallback().onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
         verify { gatt.discoverServices() }
+    }
+
+    @Test
+    fun onConnected_discoverServicesReturnsFalse_setsFailureState() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+        setActiveGatt(gatt)
+        every { gatt.discoverServices() } returns false
+        gattCallback().onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertEquals("service discovery start failed", manager.connectionState.value)
     }
 
     // ---- GATT: STATE_DISCONNECTED ----
@@ -130,6 +141,7 @@ class GooseBLEManagerTest {
     fun onDisconnected_foreignGatt_doesNotChangeState() {
         val ownGatt = mockk<BluetoothGatt>(relaxed = true)
         val foreignGatt = mockk<BluetoothGatt>(relaxed = true)
+        every { ownGatt.discoverServices() } returns true
         // Bring manager into "discovering" state with ownGatt as active
         setActiveGatt(ownGatt)
         gattCallback().onConnectionStateChange(ownGatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
@@ -160,12 +172,12 @@ class GooseBLEManagerTest {
     }
 
     @Test
-    fun onServicesDiscovered_commandCharOnly_noNotifyQueue_immediatelySetsReady() {
+    fun onServicesDiscovered_commandCharOnly_noNotifyQueue_setsNotificationNotFound() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
         val service = serviceWith(commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"))
         every { gatt.services } returns listOf(service)
         gattCallback().onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
-        assertEquals("ready", manager.connectionState.value)
+        assertEquals("notification characteristic not found", manager.connectionState.value)
     }
 
     // ---- GATT: notification enabling → ready ----
@@ -173,6 +185,7 @@ class GooseBLEManagerTest {
     @Test
     fun onDescriptorWrite_afterOneNotifyChar_setsReady() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
+        stubSuccessfulNotificationSetup(gatt)
         val service =
             serviceWith(
                 commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
@@ -190,6 +203,7 @@ class GooseBLEManagerTest {
     @Test
     fun onDescriptorWrite_twoNotifyChars_setsReadyAfterSecond() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
+        stubSuccessfulNotificationSetup(gatt)
         val service =
             serviceWith(
                 commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
@@ -207,8 +221,34 @@ class GooseBLEManagerTest {
     }
 
     @Test
+    fun onServicesDiscovered_setCharacteristicNotificationFails_setsFailedState() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+        every { gatt.setCharacteristicNotification(any(), true) } returns false
+        val service =
+            serviceWith(
+                commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
+                notifyCharWithCccd("fd4b0003-cce1-4033-93ce-002d5875f58a"),
+            )
+        every { gatt.services } returns listOf(service)
+
+        gattCallback().onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+
+        assertEquals("notification enable failed", manager.connectionState.value)
+    }
+
+    @Test
+    fun onDescriptorWrite_failure_setsFailedState() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+
+        gattCallback().onDescriptorWrite(gatt, mockk(relaxed = true), BluetoothGatt.GATT_FAILURE)
+
+        assertEquals("notification enable failed", manager.connectionState.value)
+    }
+
+    @Test
     fun notifyCharWithoutCccd_skipped_andReadySetWithoutWaiting() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
+        every { gatt.setCharacteristicNotification(any(), true) } returns true
         // notifyChar has no CCCD descriptor → enableNextNotification skips it and calls itself recursively
         val charNoCccd = commandChar("fd4b0003-cce1-4033-93ce-002d5875f58a") // getDescriptor → null
         val service = serviceWith(commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"), charNoCccd)
@@ -414,6 +454,55 @@ class GooseBLEManagerTest {
         assertNull(getAutoReconnectDevice()) // still null — no reconnect was scheduled
     }
 
+    // ---- sendCommand() ----
+
+    @Test
+    fun sendCommand_sequenceContinuesPastSignedByteMax() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+        val char = commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a")
+        every { gatt.writeCharacteristic(char) } returns true
+        setActiveGatt(gatt)
+        setCommandCharacteristic(char)
+        setCommandSequence(127)
+
+        assertTrue(manager.sendCommand(WhoopCommand.GetHello))
+        gattCallback().onCharacteristicWrite(gatt, char, BluetoothGatt.GATT_SUCCESS)
+        assertEquals(128, getCommandSequence())
+
+        assertTrue(manager.sendCommand(WhoopCommand.GetHello))
+        gattCallback().onCharacteristicWrite(gatt, char, BluetoothGatt.GATT_SUCCESS)
+        assertEquals(129, getCommandSequence())
+    }
+
+    @Test
+    fun sendCommand_sequenceWrapsAfter255() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+        val char = commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a")
+        every { gatt.writeCharacteristic(char) } returns true
+        setActiveGatt(gatt)
+        setCommandCharacteristic(char)
+        setCommandSequence(255)
+
+        assertTrue(manager.sendCommand(WhoopCommand.GetHello))
+        gattCallback().onCharacteristicWrite(gatt, char, BluetoothGatt.GATT_SUCCESS)
+        assertEquals(0, getCommandSequence())
+    }
+
+    @Test
+    fun sendCommand_secondWriteRejectedUntilCallbackCompletesFirst() {
+        val gatt = mockk<BluetoothGatt>(relaxed = true)
+        val char = commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a")
+        every { gatt.writeCharacteristic(char) } returns true
+        setActiveGatt(gatt)
+        setCommandCharacteristic(char)
+
+        assertTrue(manager.sendCommand(WhoopCommand.GetHello))
+        assertTrue(!manager.sendCommand(WhoopCommand.GetHello))
+
+        gattCallback().onCharacteristicWrite(gatt, char, BluetoothGatt.GATT_SUCCESS)
+        assertTrue(manager.sendCommand(WhoopCommand.GetHello))
+    }
+
     // ---- Reflection helpers ----
 
     private fun gattCallback(): BluetoothGattCallback {
@@ -428,6 +517,24 @@ class GooseBLEManagerTest {
         field.set(manager, gatt)
     }
 
+    private fun setCommandCharacteristic(characteristic: BluetoothGattCharacteristic) {
+        val field = GooseBLEManager::class.java.getDeclaredField("commandCharacteristic")
+        field.isAccessible = true
+        field.set(manager, characteristic)
+    }
+
+    private fun setCommandSequence(sequence: Int) {
+        val field = GooseBLEManager::class.java.getDeclaredField("commandSequence")
+        field.isAccessible = true
+        field.set(manager, sequence)
+    }
+
+    private fun getCommandSequence(): Int {
+        val field = GooseBLEManager::class.java.getDeclaredField("commandSequence")
+        field.isAccessible = true
+        return field.get(manager) as Int
+    }
+
     private fun setAutoReconnectDevice(device: android.bluetooth.BluetoothDevice) {
         val field = GooseBLEManager::class.java.getDeclaredField("autoReconnectDevice")
         field.isAccessible = true
@@ -438,6 +545,11 @@ class GooseBLEManagerTest {
         val field = GooseBLEManager::class.java.getDeclaredField("autoReconnectDevice")
         field.isAccessible = true
         return field.get(manager) as? android.bluetooth.BluetoothDevice
+    }
+
+    private fun stubSuccessfulNotificationSetup(gatt: BluetoothGatt) {
+        every { gatt.setCharacteristicNotification(any(), true) } returns true
+        every { gatt.writeDescriptor(any<BluetoothGattDescriptor>()) } returns true
     }
 
     // ---- Mock builder helpers ----

@@ -291,6 +291,27 @@ class NotificationPipelineTest {
             pipeline.close()
         }
 
+    @Test
+    fun reset_afterClose_restartsConsumerAndAcceptsFrames() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            pipeline.close()
+            pipeline.reset()
+
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
+
+            pipeline.push(helloHex.hexToBytes())
+            advanceUntilIdle()
+
+            assertEquals(1, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
+
+            job.cancelAndJoin()
+            pipeline.close()
+        }
+
     // ---- byte-by-byte accumulation ----
 
     @Test

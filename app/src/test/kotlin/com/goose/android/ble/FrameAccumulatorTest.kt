@@ -177,6 +177,29 @@ class FrameAccumulatorTest {
         assertEquals(8, result.bufferedLen)
     }
 
+    @Test
+    fun declaredLengthAboveMaxFrameLen_droppedAndResynchronizes() {
+        val oversizedHeader =
+            byteArrayOf(
+                0xaa.toByte(),
+                0x01,
+                0xff.toByte(),
+                0xff.toByte(),
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+            )
+        val validFrame = "aa0108000001e67123019101363e5c8d".hexToBytes()
+
+        val result = accumulator.feed(oversizedHeader + validFrame)
+
+        assertEquals(1, result.frames.size)
+        assertEquals(validFrame.toList(), result.frames[0].toList())
+        assertTrue(result.droppedPrefixLen >= 8)
+        assertEquals(0, result.bufferedLen)
+    }
+
     // ---- helper ----
 
     private fun String.hexToBytes(): ByteArray {
