@@ -2,23 +2,36 @@ package com.goose.android.ble
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,21 +44,155 @@ class GooseBLEManager
         private val bluetoothManager: BluetoothManager =
             context.getSystemService(BluetoothManager::class.java)
 
+        private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
         private val _connectionState = MutableStateFlow("disconnected")
         val connectionState: StateFlow<String> = _connectionState.asStateFlow()
 
-        // Tracks the active scan so stopScan() can cancel it imperatively.
-        // callbackFlow's awaitClose handles cleanup on coroutine cancellation.
+        // Guarded by `this` — accessed from both GATT binder thread and callers
+        private var activeGatt: BluetoothGatt? = null
+        private var commandCharacteristic: BluetoothGattCharacteristic? = null
+        private val pendingNotifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
+
+        @Volatile private var autoReconnectDevice: BluetoothDevice? = null
+
+        // Scan state — accessed from scan coroutines
         private var activeScanner: android.bluetooth.le.BluetoothLeScanner? = null
         private var activeScanCallback: ScanCallback? = null
+
+        private val gattCallback =
+            object : BluetoothGattCallback() {
+                @SuppressLint("MissingPermission")
+                override fun onConnectionStateChange(
+                    gatt: BluetoothGatt,
+                    status: Int,
+                    newState: Int,
+                ) {
+                    when (newState) {
+                        BluetoothProfile.STATE_CONNECTED -> {
+                            _connectionState.value = "discovering"
+                            gatt.discoverServices()
+                        }
+                        BluetoothProfile.STATE_DISCONNECTED -> {
+                            val ownedGatt =
+                                synchronized(this@GooseBLEManager) {
+                                    if (activeGatt === gatt) {
+                                        activeGatt = null
+                                        commandCharacteristic = null
+                                        pendingNotifyQueue.clear()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            gatt.close()
+                            if (ownedGatt) {
+                                _connectionState.value = "disconnected"
+                                val reconnect = autoReconnectDevice
+                                // Reconnect on unexpected disconnect (status != GATT_SUCCESS means error)
+                                if (reconnect != null && status != BluetoothGatt.GATT_SUCCESS) {
+                                    scheduleReconnect(reconnect)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                @SuppressLint("MissingPermission")
+                override fun onServicesDiscovered(
+                    gatt: BluetoothGatt,
+                    status: Int,
+                ) {
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        _connectionState.value = "service discovery failed"
+                        return
+                    }
+
+                    val commandChar = findCommandCharacteristic(gatt)
+                    if (commandChar == null) {
+                        _connectionState.value = "characteristic not found"
+                        return
+                    }
+
+                    val notifyChars = findNotificationCharacteristics(gatt)
+                    synchronized(this@GooseBLEManager) {
+                        commandCharacteristic = commandChar
+                        pendingNotifyQueue.clear()
+                        pendingNotifyQueue.addAll(notifyChars)
+                    }
+                    enableNextNotification(gatt)
+                }
+
+                @SuppressLint("MissingPermission")
+                override fun onDescriptorWrite(
+                    gatt: BluetoothGatt,
+                    descriptor: BluetoothGattDescriptor,
+                    status: Int,
+                ) {
+                    enableNextNotification(gatt)
+                }
+
+                override fun onCharacteristicChanged(
+                    gatt: BluetoothGatt,
+                    characteristic: BluetoothGattCharacteristic,
+                    value: ByteArray,
+                ) {
+                    // T-011: forward to frame parser and emit WhoopFrame
+                }
+
+                @Deprecated("Deprecated in API 33")
+                override fun onCharacteristicChanged(
+                    gatt: BluetoothGatt,
+                    characteristic: BluetoothGattCharacteristic,
+                ) {
+                    @Suppress("DEPRECATION")
+                    characteristic.value?.let { value ->
+                        onCharacteristicChanged(gatt, characteristic, value)
+                    }
+                }
+            }
 
         fun hasRequiredPermissions(): Boolean =
             REQUIRED_PERMISSIONS.all { permission ->
                 ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
             }
 
-        /** Emits [ScanResult]s for WHOOP devices filtered by service UUID.
-         *  Cancelling the collector automatically stops the scan. */
+        /** Connects to [device] and starts GATT service discovery. */
+        @SuppressLint("MissingPermission")
+        fun connect(device: BluetoothDevice) {
+            synchronized(this) {
+                activeGatt?.let { gatt ->
+                    gatt.disconnect()
+                    gatt.close()
+                    activeGatt = null
+                    commandCharacteristic = null
+                    pendingNotifyQueue.clear()
+                }
+            }
+            autoReconnectDevice = device
+            _connectionState.value = "connecting"
+            val gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            synchronized(this) { activeGatt = gatt }
+        }
+
+        /** Disconnects and clears the remembered device, suppressing auto-reconnect. */
+        @SuppressLint("MissingPermission")
+        fun disconnect() {
+            autoReconnectDevice = null
+            val gatt =
+                synchronized(this) {
+                    val g = activeGatt
+                    activeGatt = null
+                    commandCharacteristic = null
+                    pendingNotifyQueue.clear()
+                    g
+                }
+            _connectionState.value = "disconnected"
+            gatt?.disconnect()
+            gatt?.close()
+        }
+
+        /** Emits [ScanResult]s for WHOOP devices filtered by service UUID. */
         @SuppressLint("MissingPermission")
         fun scanFlow(): Flow<ScanResult> =
             callbackFlow {
@@ -93,7 +240,7 @@ class GooseBLEManager
                 }
             }
 
-        /** Stops an active scan started via [scanFlow]. Prefer cancelling the collector instead. */
+        /** Stops an active scan started via [scanFlow]. */
         @SuppressLint("MissingPermission")
         fun stopScan() {
             val scanner = activeScanner ?: return
@@ -101,6 +248,48 @@ class GooseBLEManager
             scanner.stopScan(callback)
             activeScanner = null
             activeScanCallback = null
+        }
+
+        @SuppressLint("MissingPermission")
+        @Suppress("DEPRECATION")
+        private fun enableNextNotification(gatt: BluetoothGatt) {
+            val characteristic = synchronized(this) { pendingNotifyQueue.removeFirstOrNull() }
+            if (characteristic == null) {
+                _connectionState.value = "ready"
+                return
+            }
+            gatt.setCharacteristicNotification(characteristic, true)
+            val descriptor = characteristic.getDescriptor(CCCD_UUID)
+            if (descriptor == null) {
+                // No CCCD on this characteristic — skip and continue
+                enableNextNotification(gatt)
+                return
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            } else {
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                gatt.writeDescriptor(descriptor)
+            }
+        }
+
+        private fun findCommandCharacteristic(gatt: BluetoothGatt): BluetoothGattCharacteristic? =
+            gatt.services
+                .flatMap { it.characteristics ?: emptyList() }
+                .firstOrNull { c -> COMMAND_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid } }
+
+        private fun findNotificationCharacteristics(gatt: BluetoothGatt): List<BluetoothGattCharacteristic> =
+            gatt.services
+                .flatMap { it.characteristics ?: emptyList() }
+                .filter { c -> NOTIFICATION_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid } }
+
+        private fun scheduleReconnect(device: BluetoothDevice) {
+            managerScope.launch {
+                delay(RECONNECT_DELAY_MS)
+                if (_connectionState.value == "disconnected" && autoReconnectDevice != null) {
+                    connect(device)
+                }
+            }
         }
 
         companion object {
@@ -116,5 +305,30 @@ class GooseBLEManager
                     "fd4b0001-cce1-4033-93ce-002d5875f58a",
                     "61080001-8d6d-82b8-614a-1c8cb0f8dcc6",
                 )
+
+            /** Command write characteristic UUIDs (one per generation). */
+            val COMMAND_CHARACTERISTIC_UUIDS: List<String> =
+                listOf(
+                    "fd4b0002-cce1-4033-93ce-002d5875f58a",
+                    "61080002-8d6d-82b8-614a-1c8cb0f8dcc6",
+                )
+
+            /** Notification/indicate characteristic UUIDs — all gens. */
+            val NOTIFICATION_CHARACTERISTIC_UUIDS: List<String> =
+                listOf(
+                    "fd4b0003-cce1-4033-93ce-002d5875f58a",
+                    "fd4b0004-cce1-4033-93ce-002d5875f58a",
+                    "fd4b0005-cce1-4033-93ce-002d5875f58a",
+                    "fd4b0007-cce1-4033-93ce-002d5875f58a",
+                    "61080003-8d6d-82b8-614a-1c8cb0f8dcc6",
+                    "61080004-8d6d-82b8-614a-1c8cb0f8dcc6",
+                    "61080005-8d6d-82b8-614a-1c8cb0f8dcc6",
+                    "61080007-8d6d-82b8-614a-1c8cb0f8dcc6",
+                )
+
+            /** Client Characteristic Configuration Descriptor UUID (Bluetooth SIG standard). */
+            val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+            private const val RECONNECT_DELAY_MS = 3_000L
         }
     }
