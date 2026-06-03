@@ -40,7 +40,7 @@ class GooseBLEManagerTest {
         managerScope = TestScope(StandardTestDispatcher())
         val ctx = mockk<Context>(relaxed = true)
         every { ctx.getSystemService(BluetoothManager::class.java) } returns mockk(relaxed = true)
-        manager = GooseBLEManager(ctx, managerScope.backgroundScope)
+        manager = GooseBLEManager(ctx, managerScope)
     }
 
     @After

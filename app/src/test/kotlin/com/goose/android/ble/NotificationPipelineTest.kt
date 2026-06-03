@@ -38,148 +38,156 @@ class NotificationPipelineTest {
     // ---- single complete frame ----
 
     @Test
-    fun push_singleCompleteFrame_emitsOneFrame() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle() // start consumer + collector before any push
+    fun push_singleCompleteFrame_emitsOneFrame() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle() // start consumer + collector before any push
 
-        pipeline.push(helloHex.hexToBytes())
-        advanceUntilIdle()
+            pipeline.push(helloHex.hexToBytes())
+            advanceUntilIdle()
 
-        assertEquals(1, collected.size)
-        assertTrue(collected[0] is WhoopFrame.Command)
+            assertEquals(1, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- frame split across two pushes ----
 
     @Test
-    fun push_splitFrame_reassemblesAndEmitsAfterSecondPush() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_splitFrame_reassemblesAndEmitsAfterSecondPush() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        val bytes = helloHex.hexToBytes()
-        val mid = bytes.size / 2
+            val bytes = helloHex.hexToBytes()
+            val mid = bytes.size / 2
 
-        pipeline.push(bytes.sliceArray(0 until mid))
-        advanceUntilIdle()
-        assertEquals(0, collected.size)
+            pipeline.push(bytes.sliceArray(0 until mid))
+            advanceUntilIdle()
+            assertEquals(0, collected.size)
 
-        pipeline.push(bytes.sliceArray(mid until bytes.size))
-        advanceUntilIdle()
-        assertEquals(1, collected.size)
-        assertTrue(collected[0] is WhoopFrame.Command)
+            pipeline.push(bytes.sliceArray(mid until bytes.size))
+            advanceUntilIdle()
+            assertEquals(1, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- two frames in one push ----
 
     @Test
-    fun push_twoFramesConcatenated_emitsBothFrames() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_twoFramesConcatenated_emitsBothFrames() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push((helloHex + eventHex).hexToBytes())
-        advanceUntilIdle()
+            pipeline.push((helloHex + eventHex).hexToBytes())
+            advanceUntilIdle()
 
-        assertEquals(2, collected.size)
-        assertTrue(collected[0] is WhoopFrame.Command)
-        assertTrue(collected[1] is WhoopFrame.Event)
+            assertEquals(2, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
+            assertTrue(collected[1] is WhoopFrame.Event)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- three distinct frame types ----
 
     @Test
-    fun push_allThreeFrameTypes_emittedInOrder() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_allThreeFrameTypes_emittedInOrder() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push(helloHex.hexToBytes())
-        pipeline.push(eventHex.hexToBytes())
-        pipeline.push(historicalHex.hexToBytes())
-        advanceUntilIdle()
+            pipeline.push(helloHex.hexToBytes())
+            pipeline.push(eventHex.hexToBytes())
+            pipeline.push(historicalHex.hexToBytes())
+            advanceUntilIdle()
 
-        assertEquals(3, collected.size)
-        assertTrue(collected[0] is WhoopFrame.Command)
-        assertTrue(collected[1] is WhoopFrame.Event)
-        assertTrue(collected[2] is WhoopFrame.HistoricalData)
+            assertEquals(3, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
+            assertTrue(collected[1] is WhoopFrame.Event)
+            assertTrue(collected[2] is WhoopFrame.HistoricalData)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- empty push emits nothing ----
 
     @Test
-    fun push_emptyBytes_emitsNothing() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_emptyBytes_emitsNothing() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push(byteArrayOf())
-        advanceUntilIdle()
+            pipeline.push(byteArrayOf())
+            advanceUntilIdle()
 
-        assertTrue(collected.isEmpty())
+            assertTrue(collected.isEmpty())
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- garbage bytes increment parserDroppedByteCount ----
 
     @Test
-    fun push_garbageBytes_incrementsParserDroppedByteCount() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val job = launch { pipeline.frames.collect {} }
-        advanceUntilIdle()
+    fun push_garbageBytes_incrementsParserDroppedByteCount() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val job = launch { pipeline.frames.collect {} }
+            advanceUntilIdle()
 
-        pipeline.push(byteArrayOf(0xde.toByte(), 0xad.toByte(), 0xbe.toByte(), 0xef.toByte()))
-        advanceUntilIdle()
+            pipeline.push(byteArrayOf(0xde.toByte(), 0xad.toByte(), 0xbe.toByte(), 0xef.toByte()))
+            advanceUntilIdle()
 
-        assertTrue(pipeline.parserDroppedByteCount > 0)
+            assertTrue(pipeline.parserDroppedByteCount > 0)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     @Test
-    fun push_garbagePrefixThenValidFrame_dropsGarbageAndEmitsFrame() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_garbagePrefixThenValidFrame_dropsGarbageAndEmitsFrame() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        val garbage = byteArrayOf(0xde.toByte(), 0xad.toByte())
-        pipeline.push(garbage + helloHex.hexToBytes())
-        advanceUntilIdle()
+            val garbage = byteArrayOf(0xde.toByte(), 0xad.toByte())
+            pipeline.push(garbage + helloHex.hexToBytes())
+            advanceUntilIdle()
 
-        assertEquals(1, collected.size)
-        assertTrue(pipeline.parserDroppedByteCount >= 2)
+            assertEquals(1, collected.size)
+            assertTrue(pipeline.parserDroppedByteCount >= 2)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- queue depth ----
 
     @Test
-    fun queueDepth_zeroInitially() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        assertEquals(0, pipeline.queueDepth)
-    }
+    fun queueDepth_zeroInitially() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            assertEquals(0, pipeline.queueDepth)
+        }
 
     @Test
     fun queueDepth_incrementsOnPush_decrementsAfterConsume() {
         val scope = makeScope()
-        val pipeline = NotificationPipeline(scope.backgroundScope)
+        val pipeline = NotificationPipeline(scope)
 
         // Consumer not yet started (StandardTestDispatcher is lazy)
         pipeline.push(helloHex.hexToBytes())
@@ -194,16 +202,17 @@ class NotificationPipelineTest {
     // ---- back-pressure: droppedNotificationCount ----
 
     @Test
-    fun droppedNotificationCount_zeroInitially() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        assertEquals(0L, pipeline.droppedNotificationCount)
-    }
+    fun droppedNotificationCount_zeroInitially() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            assertEquals(0L, pipeline.droppedNotificationCount)
+        }
 
     @Test
     fun droppedNotificationCount_incrementsWhenChannelFull() {
         // Capacity=2: fill channel before consumer starts, then push a third → drop
         val scope = makeScope()
-        val pipeline = NotificationPipeline(scope.backgroundScope, channelCapacity = 2)
+        val pipeline = NotificationPipeline(scope, channelCapacity = 2)
 
         pipeline.push(helloHex.hexToBytes()) // depth=1
         pipeline.push(helloHex.hexToBytes()) // depth=2 (full)
@@ -219,7 +228,7 @@ class NotificationPipelineTest {
     @Test
     fun droppedNotificationCount_accumulatesMultipleDrops() {
         val scope = makeScope()
-        val pipeline = NotificationPipeline(scope.backgroundScope, channelCapacity = 1)
+        val pipeline = NotificationPipeline(scope, channelCapacity = 1)
 
         pipeline.push(helloHex.hexToBytes()) // depth=1 (full)
         pipeline.push(helloHex.hexToBytes()) // drop
@@ -236,7 +245,7 @@ class NotificationPipelineTest {
     @Test
     fun reset_clearsDroppedNotificationCount() {
         val scope = makeScope()
-        val pipeline = NotificationPipeline(scope.backgroundScope, channelCapacity = 1)
+        val pipeline = NotificationPipeline(scope, channelCapacity = 1)
 
         pipeline.push(helloHex.hexToBytes()) // full
         pipeline.push(helloHex.hexToBytes()) // drop
@@ -249,130 +258,136 @@ class NotificationPipelineTest {
     }
 
     @Test
-    fun reset_clearsPartialParserBuffer() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun reset_clearsPartialParserBuffer() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        val bytes = helloHex.hexToBytes()
-        // Push only half — starts accumulating in parser buffer
-        pipeline.push(bytes.sliceArray(0 until bytes.size / 2))
-        advanceUntilIdle()
-        assertEquals(0, collected.size)
+            val bytes = helloHex.hexToBytes()
+            // Push only half — starts accumulating in parser buffer
+            pipeline.push(bytes.sliceArray(0 until bytes.size / 2))
+            advanceUntilIdle()
+            assertEquals(0, collected.size)
 
-        pipeline.reset()
+            pipeline.reset()
 
-        // After reset, full frame must produce exactly 1 frame (no stale bytes)
-        pipeline.push(bytes)
-        advanceUntilIdle()
-        assertEquals(1, collected.size)
+            // After reset, full frame must produce exactly 1 frame (no stale bytes)
+            pipeline.push(bytes)
+            advanceUntilIdle()
+            assertEquals(1, collected.size)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     // ---- byte-by-byte accumulation ----
 
     @Test
-    fun push_byteByByte_reassemblesCompleteFrame() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun push_byteByByte_reassemblesCompleteFrame() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        val bytes = helloHex.hexToBytes()
-        for (byte in bytes) {
-            pipeline.push(byteArrayOf(byte))
+            val bytes = helloHex.hexToBytes()
+            for (byte in bytes) {
+                pipeline.push(byteArrayOf(byte))
+            }
+            advanceUntilIdle()
+
+            assertEquals(1, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
+
+            job.cancelAndJoin()
         }
-        advanceUntilIdle()
-
-        assertEquals(1, collected.size)
-        assertTrue(collected[0] is WhoopFrame.Command)
-
-        job.cancelAndJoin()
-    }
 
     // ---- frame field values ----
 
     @Test
-    fun emittedCommandFrame_hasCorrectFieldValues() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun emittedCommandFrame_hasCorrectFieldValues() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push(helloHex.hexToBytes())
-        advanceUntilIdle()
+            pipeline.push(helloHex.hexToBytes())
+            advanceUntilIdle()
 
-        val frame = collected[0] as WhoopFrame.Command
-        assertEquals(WhoopFrameConstants.PACKET_TYPE_COMMAND, frame.packetType)
-        assertEquals(1.toByte(), frame.sequence)
-        assertEquals(WhoopFrameConstants.COMMAND_GET_HELLO, frame.command)
-        assertTrue(frame.headerCrcValid)
-        assertTrue(frame.payloadCrcValid)
-        assertTrue(frame.warnings.isEmpty())
+            val frame = collected[0] as WhoopFrame.Command
+            assertEquals(WhoopFrameConstants.PACKET_TYPE_COMMAND, frame.packetType)
+            assertEquals(1.toByte(), frame.sequence)
+            assertEquals(WhoopFrameConstants.COMMAND_GET_HELLO, frame.command)
+            assertTrue(frame.headerCrcValid)
+            assertTrue(frame.payloadCrcValid)
+            assertTrue(frame.warnings.isEmpty())
 
-        job.cancelAndJoin()
-    }
-
-    @Test
-    fun emittedEventFrame_hasCorrectFieldValues() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
-
-        pipeline.push(eventHex.hexToBytes())
-        advanceUntilIdle()
-
-        val frame = collected[0] as WhoopFrame.Event
-        assertEquals(WhoopFrameConstants.PACKET_TYPE_EVENT, frame.packetType)
-        assertEquals(2.toByte(), frame.sequence)
-        assertEquals(17.toUShort(), frame.eventId)
-        assertTrue(frame.headerCrcValid)
-        assertTrue(frame.payloadCrcValid)
-
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
 
     @Test
-    fun emittedHistoricalFrame_hasCorrectFieldValues() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val collected = mutableListOf<WhoopFrame>()
-        val job = launch { pipeline.frames.collect { collected.add(it) } }
-        advanceUntilIdle()
+    fun emittedEventFrame_hasCorrectFieldValues() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push(historicalHex.hexToBytes())
-        advanceUntilIdle()
+            pipeline.push(eventHex.hexToBytes())
+            advanceUntilIdle()
 
-        val frame = collected[0] as WhoopFrame.HistoricalData
-        assertEquals(WhoopFrameConstants.PACKET_TYPE_HISTORICAL_DATA, frame.packetType)
-        assertEquals(18.toByte(), frame.sequence)
-        assertEquals(18.toByte(), frame.packetK)
-        assertTrue(frame.headerCrcValid)
-        assertTrue(frame.payloadCrcValid)
+            val frame = collected[0] as WhoopFrame.Event
+            assertEquals(WhoopFrameConstants.PACKET_TYPE_EVENT, frame.packetType)
+            assertEquals(2.toByte(), frame.sequence)
+            assertEquals(17.toUShort(), frame.eventId)
+            assertTrue(frame.headerCrcValid)
+            assertTrue(frame.payloadCrcValid)
 
-        job.cancelAndJoin()
-    }
+            job.cancelAndJoin()
+        }
+
+    @Test
+    fun emittedHistoricalFrame_hasCorrectFieldValues() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { pipeline.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
+
+            pipeline.push(historicalHex.hexToBytes())
+            advanceUntilIdle()
+
+            val frame = collected[0] as WhoopFrame.HistoricalData
+            assertEquals(WhoopFrameConstants.PACKET_TYPE_HISTORICAL_DATA, frame.packetType)
+            assertEquals(18.toByte(), frame.sequence)
+            assertEquals(18.toByte(), frame.packetK)
+            assertTrue(frame.headerCrcValid)
+            assertTrue(frame.payloadCrcValid)
+
+            job.cancelAndJoin()
+        }
 
     // ---- multiple subscribers ----
 
     @Test
-    fun frames_multipleCollectors_allReceiveSameFrames() = runTest {
-        val pipeline = NotificationPipeline(backgroundScope)
-        val results1 = mutableListOf<WhoopFrame>()
-        val results2 = mutableListOf<WhoopFrame>()
-        val job1 = launch { pipeline.frames.collect { results1.add(it) } }
-        val job2 = launch { pipeline.frames.collect { results2.add(it) } }
-        advanceUntilIdle()
+    fun frames_multipleCollectors_allReceiveSameFrames() =
+        runTest {
+            val pipeline = NotificationPipeline(this)
+            val results1 = mutableListOf<WhoopFrame>()
+            val results2 = mutableListOf<WhoopFrame>()
+            val job1 = launch { pipeline.frames.collect { results1.add(it) } }
+            val job2 = launch { pipeline.frames.collect { results2.add(it) } }
+            advanceUntilIdle()
 
-        pipeline.push(helloHex.hexToBytes())
-        advanceUntilIdle()
+            pipeline.push(helloHex.hexToBytes())
+            advanceUntilIdle()
 
-        assertEquals(1, results1.size)
-        assertEquals(1, results2.size)
+            assertEquals(1, results1.size)
+            assertEquals(1, results2.size)
 
-        job1.cancelAndJoin()
-        job2.cancelAndJoin()
-    }
+            job1.cancelAndJoin()
+            job2.cancelAndJoin()
+        }
 }

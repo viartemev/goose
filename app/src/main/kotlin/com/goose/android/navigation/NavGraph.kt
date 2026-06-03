@@ -10,7 +10,10 @@ import com.goose.android.ui.screens.HomeScreen
 import com.goose.android.ui.screens.MoreScreen
 
 @Composable
-fun GooseNavGraph(gooseNav: GooseNavController, modifier: Modifier = Modifier) {
+fun GooseNavGraph(
+    gooseNav: GooseNavController,
+    modifier: Modifier = Modifier,
+) {
     NavHost(
         navController = gooseNav.navController,
         startDestination = GooseTab.Home.route,
