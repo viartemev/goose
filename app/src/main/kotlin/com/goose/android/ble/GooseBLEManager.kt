@@ -22,6 +22,7 @@ import com.goose.android.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -76,11 +77,13 @@ class GooseBLEManager
         // Guarded by `this` — accessed from both GATT binder thread and callers
         private var activeGatt: BluetoothGatt? = null
         private var commandCharacteristic: BluetoothGattCharacteristic? = null
+        private var commandWriteInFlight = false
         private val pendingNotifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
 
-        @Volatile private var commandSequence: Byte = 0
+        @Volatile private var commandSequence: Int = 0
 
         @Volatile private var autoReconnectDevice: BluetoothDevice? = null
+        private var reconnectJob: Job? = null
 
         // Scan state — accessed from scan coroutines
         private var activeScanner: android.bluetooth.le.BluetoothLeScanner? = null
@@ -94,10 +97,16 @@ class GooseBLEManager
                     status: Int,
                     newState: Int,
                 ) {
+                    if (status != BluetoothGatt.GATT_SUCCESS && newState != BluetoothProfile.STATE_DISCONNECTED) {
+                        handleGattFailure(gatt, "connection failed")
+                        return
+                    }
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> {
                             _connectionState.value = "discovering"
-                            gatt.discoverServices()
+                            if (!gatt.discoverServices()) {
+                                handleGattFailure(gatt, "service discovery start failed")
+                            }
                         }
                         BluetoothProfile.STATE_DISCONNECTED -> {
                             val ownedGatt =
@@ -105,6 +114,7 @@ class GooseBLEManager
                                     if (activeGatt === gatt) {
                                         activeGatt = null
                                         commandCharacteristic = null
+                                        commandWriteInFlight = false
                                         pendingNotifyQueue.clear()
                                         true
                                     } else {
@@ -141,6 +151,10 @@ class GooseBLEManager
                     }
 
                     val notifyChars = findNotificationCharacteristics(gatt)
+                    if (notifyChars.isEmpty()) {
+                        _connectionState.value = "notification characteristic not found"
+                        return
+                    }
                     synchronized(this@GooseBLEManager) {
                         commandCharacteristic = commandChar
                         pendingNotifyQueue.clear()
@@ -155,6 +169,11 @@ class GooseBLEManager
                     descriptor: BluetoothGattDescriptor,
                     status: Int,
                 ) {
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        synchronized(this@GooseBLEManager) { pendingNotifyQueue.clear() }
+                        _connectionState.value = "notification enable failed"
+                        return
+                    }
                     enableNextNotification(gatt)
                 }
 
@@ -164,6 +183,25 @@ class GooseBLEManager
                     value: ByteArray,
                 ) {
                     handleCharacteristicChanged(characteristic.uuid, value)
+                }
+
+                override fun onCharacteristicWrite(
+                    gatt: BluetoothGatt,
+                    characteristic: BluetoothGattCharacteristic,
+                    status: Int,
+                ) {
+                    val ownedWrite =
+                        synchronized(this@GooseBLEManager) {
+                        if (activeGatt === gatt && commandCharacteristic === characteristic) {
+                            commandWriteInFlight = false
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    if (ownedWrite && status != BluetoothGatt.GATT_SUCCESS) {
+                        _connectionState.value = "command write failed"
+                    }
                 }
 
                 @Deprecated("Deprecated in API 33")
@@ -187,11 +225,14 @@ class GooseBLEManager
         @SuppressLint("MissingPermission")
         fun connect(device: BluetoothDevice) {
             synchronized(this) {
+                reconnectJob?.cancel()
+                reconnectJob = null
                 activeGatt?.let { gatt ->
                     gatt.disconnect()
                     gatt.close()
                     activeGatt = null
                     commandCharacteristic = null
+                    commandWriteInFlight = false
                     pendingNotifyQueue.clear()
                 }
             }
@@ -207,11 +248,16 @@ class GooseBLEManager
         @SuppressLint("MissingPermission")
         fun disconnect() {
             autoReconnectDevice = null
+            synchronized(this) {
+                reconnectJob?.cancel()
+                reconnectJob = null
+            }
             val gatt =
                 synchronized(this) {
                     val g = activeGatt
                     activeGatt = null
                     commandCharacteristic = null
+                    commandWriteInFlight = false
                     pendingNotifyQueue.clear()
                     g
                 }
@@ -275,25 +321,35 @@ class GooseBLEManager
         @SuppressLint("MissingPermission")
         @Suppress("DEPRECATION")
         fun sendCommand(command: WhoopCommand): Boolean {
-            val (gatt, char) = synchronized(this) { activeGatt to commandCharacteristic }
-            if (gatt == null || char == null) return false
-
-            val seq =
+            val writeRequest =
                 synchronized(this) {
-                    val s = commandSequence
-                    commandSequence = if (s == Byte.MAX_VALUE) 0 else (s + 1).toByte()
-                    s
+                    if (commandWriteInFlight) return false
+                    val gatt = activeGatt ?: return false
+                    val char = commandCharacteristic ?: return false
+                    val sequence = commandSequence.toByte()
+                    commandSequence = (commandSequence + 1) and 0xff
+                    commandWriteInFlight = true
+                    CommandWriteRequest(gatt, char, sequence)
                 }
-            val frame = WhoopCommandBuilder.build(command, seq)
+            val frame = WhoopCommandBuilder.build(command, writeRequest.sequence)
 
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
-                    BluetoothGatt.GATT_SUCCESS
-            } else {
-                char.value = frame
-                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                gatt.writeCharacteristic(char)
+            val writeStarted =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    writeRequest.gatt.writeCharacteristic(
+                        writeRequest.characteristic,
+                        frame,
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                    ) ==
+                        BluetoothGatt.GATT_SUCCESS
+                } else {
+                    writeRequest.characteristic.value = frame
+                    writeRequest.characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    writeRequest.gatt.writeCharacteristic(writeRequest.characteristic)
+                }
+            if (!writeStarted) {
+                synchronized(this) { commandWriteInFlight = false }
             }
+            return writeStarted
         }
 
         /** Stops an active scan started via [scanFlow]. */
@@ -308,24 +364,46 @@ class GooseBLEManager
 
         @SuppressLint("MissingPermission")
         @Suppress("DEPRECATION")
+        private fun onAllNotificationsEnabled() {
+            _connectionState.value = "ready"
+            // Start real-time HR streaming — band won't send HR until this toggle.
+            // Ported from iOS GooseBLEClient.swift SensorStreamCommandKind.TOGGLE_REALTIME_HR_ON.
+            managerScope.launch {
+                delay(STARTUP_COMMAND_DELAY_MS)
+                sendCommand(WhoopCommand.ToggleRealtimeHROn)
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        @Suppress("DEPRECATION")
         private fun enableNextNotification(gatt: BluetoothGatt) {
             val characteristic = synchronized(this) { pendingNotifyQueue.removeFirstOrNull() }
             if (characteristic == null) {
-                _connectionState.value = "ready"
+                onAllNotificationsEnabled()
                 return
             }
-            gatt.setCharacteristicNotification(characteristic, true)
+            if (!gatt.setCharacteristicNotification(characteristic, true)) {
+                synchronized(this) { pendingNotifyQueue.clear() }
+                _connectionState.value = "notification enable failed"
+                return
+            }
             val descriptor = characteristic.getDescriptor(CCCD_UUID)
             if (descriptor == null) {
                 // No CCCD on this characteristic — skip and continue
                 enableNextNotification(gatt)
                 return
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            } else {
-                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(descriptor)
+            val writeStarted =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                        BluetoothGatt.GATT_SUCCESS
+                } else {
+                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    gatt.writeDescriptor(descriptor)
+                }
+            if (!writeStarted) {
+                synchronized(this) { pendingNotifyQueue.clear() }
+                _connectionState.value = "notification enable failed"
             }
         }
 
@@ -357,12 +435,49 @@ class GooseBLEManager
             }
         }
 
+        private data class CommandWriteRequest(
+            val gatt: BluetoothGatt,
+            val characteristic: BluetoothGattCharacteristic,
+            val sequence: Byte,
+        )
+
         private fun scheduleReconnect(device: BluetoothDevice) {
-            managerScope.launch {
-                delay(RECONNECT_DELAY_MS)
-                if (_connectionState.value == "disconnected" && autoReconnectDevice != null) {
-                    connect(device)
+            synchronized(this) {
+                reconnectJob?.cancel()
+                reconnectJob =
+                    managerScope.launch {
+                        delay(RECONNECT_DELAY_MS)
+                        val shouldReconnect =
+                            _connectionState.value == "disconnected" &&
+                                autoReconnectDevice?.address == device.address
+                        if (shouldReconnect) {
+                            connect(device)
+                        }
+                    }
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        private fun handleGattFailure(
+            gatt: BluetoothGatt,
+            state: String,
+        ) {
+            val ownedGatt =
+                synchronized(this) {
+                    if (activeGatt === gatt) {
+                        activeGatt = null
+                        commandCharacteristic = null
+                        commandWriteInFlight = false
+                        pendingNotifyQueue.clear()
+                        true
+                    } else {
+                        false
+                    }
                 }
+            gatt.close()
+            if (ownedGatt) {
+                _connectionState.value = state
+                autoReconnectDevice?.let { scheduleReconnect(it) }
             }
         }
 
@@ -403,6 +518,7 @@ class GooseBLEManager
             /** Client Characteristic Configuration Descriptor UUID (Bluetooth SIG standard). */
             val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
+            private const val STARTUP_COMMAND_DELAY_MS = 200L
             private const val RECONNECT_DELAY_MS = 3_000L
         }
     }

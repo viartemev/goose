@@ -27,6 +27,12 @@ internal class FrameAccumulator {
 
         while (true) {
             val expected = expectedFrameLen() ?: break
+            if (expected > MAX_FRAME_LEN) {
+                buffer.removeFirst()
+                dropped++
+                dropped += dropUntilFrameStart()
+                continue
+            }
             if (buffer.size < expected) break
 
             frames.add(ByteArray(expected) { buffer[it] })
@@ -79,5 +85,9 @@ internal class FrameAccumulator {
                 dropped
             }
         }
+    }
+
+    companion object {
+        const val MAX_FRAME_LEN = 4096
     }
 }
