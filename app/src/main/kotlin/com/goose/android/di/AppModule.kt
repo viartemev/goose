@@ -28,5 +28,6 @@ object AppModule {
     ): GooseDatabase =
         Room
             .databaseBuilder(context, GooseDatabase::class.java, "goose.db")
+            .addMigrations(GooseDatabase.MIGRATION_1_2)
             .build()
 }
