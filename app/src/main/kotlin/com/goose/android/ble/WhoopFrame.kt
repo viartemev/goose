@@ -31,6 +31,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is RealtimeData && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -50,6 +51,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is HistoricalData && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -67,6 +69,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is CommandResponse && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -85,6 +88,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is Event && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -99,6 +103,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is Metadata && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -114,6 +119,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is Command && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 
@@ -128,6 +134,7 @@ sealed class WhoopFrame {
         override val warnings: List<String>,
     ) : WhoopFrame() {
         override fun equals(other: Any?) = other is Unknown && rawBytes.contentEquals(other.rawBytes)
+
         override fun hashCode() = rawBytes.contentHashCode()
     }
 }

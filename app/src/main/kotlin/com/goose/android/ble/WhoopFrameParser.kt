@@ -283,7 +283,10 @@ class WhoopFrameParser {
 
     // --- helpers ---
 
-    private fun readU32Le(data: ByteArray, offset: Int): UInt? {
+    private fun readU32Le(
+        data: ByteArray,
+        offset: Int,
+    ): UInt? {
         if (offset + 4 > data.size) return null
         return (data[offset].toInt() and 0xff).toUInt() or
             ((data[offset + 1].toInt() and 0xff).toUInt() shl 8) or
@@ -291,7 +294,10 @@ class WhoopFrameParser {
             ((data[offset + 3].toInt() and 0xff).toUInt() shl 24)
     }
 
-    private fun readU16Le(data: ByteArray, offset: Int): UShort? {
+    private fun readU16Le(
+        data: ByteArray,
+        offset: Int,
+    ): UShort? {
         if (offset + 2 > data.size) return null
         return ((data[offset].toInt() and 0xff) or ((data[offset + 1].toInt() and 0xff) shl 8)).toUShort()
     }

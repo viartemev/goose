@@ -66,8 +66,8 @@ class WhoopFrameParserTest {
 
         assertEquals(WhoopFrameConstants.PACKET_TYPE_HISTORICAL_DATA, frame.packetType)
         assertEquals(18.toByte(), frame.sequence)
-        assertEquals(18.toByte(), frame.packetK)        // packet_k = 0x12 = 18
-        assertEquals(1.toByte(), frame.statusOrStream)  // 0x01
+        assertEquals(18.toByte(), frame.packetK) // packet_k = 0x12 = 18
+        assertEquals(1.toByte(), frame.statusOrStream) // 0x01
         assertTrue(frame.headerCrcValid)
         assertTrue(frame.payloadCrcValid)
         assertTrue(frame.warnings.isEmpty())
