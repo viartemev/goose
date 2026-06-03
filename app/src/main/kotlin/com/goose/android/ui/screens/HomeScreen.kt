@@ -32,8 +32,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.goose.android.ble.GooseBLEManager
 import com.goose.android.ui.theme.GooseAccent
 import com.goose.android.ui.theme.GooseRecoveryGreen
@@ -54,17 +55,20 @@ import com.goose.android.ui.theme.GooseTextTertiary
 
 @Composable
 fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
-    val connectionState by viewModel.connectionState.collectAsState()
-    val liveHR by viewModel.liveHeartRate.collectAsState()
-    val scannedDevices by viewModel.scannedDevices.collectAsState()
-    val isScanning by viewModel.isScanning.collectAsState()
-    val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
+    val liveHR by viewModel.liveHeartRate.collectAsStateWithLifecycle()
+    val scannedDevices by viewModel.scannedDevices.collectAsStateWithLifecycle()
+    val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-
-    fun hasPermissions() =
-        GooseBLEManager.REQUIRED_PERMISSIONS.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    val hasPermissions =
+        remember(context) {
+            {
+                GooseBLEManager.REQUIRED_PERMISSIONS.all {
+                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                }
+            }
         }
 
     val permissionLauncher =

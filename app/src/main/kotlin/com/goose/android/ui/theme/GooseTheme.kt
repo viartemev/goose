@@ -27,6 +27,7 @@ private val DarkColorScheme =
 // Light mirrors dark — Goose is a dark-first app
 private val LightColorScheme = DarkColorScheme
 
+@androidx.compose.runtime.Immutable
 data class GooseMetricColors(
     val recoveryHigh: Color = GooseRecoveryGreen,
     val recoveryMid: Color = GooseRecoveryYellow,
