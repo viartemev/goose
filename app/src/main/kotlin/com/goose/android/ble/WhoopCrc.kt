@@ -4,26 +4,6 @@ package com.goose.android.ble
 @OptIn(ExperimentalUnsignedTypes::class)
 internal object WhoopCrc {
     /**
-     * CRC-8 (used for Gen4 header validation).
-     * Polynomial 0x07, initial value 0x00.
-     */
-    fun crc8(
-        data: ByteArray,
-        fromIndex: Int = 0,
-        toIndex: Int = data.size,
-    ): Byte {
-        var crc = 0
-        for (i in fromIndex until toIndex) {
-            crc = crc xor (data[i].toInt() and 0xff)
-            repeat(8) {
-                crc = if (crc and 0x80 != 0) (crc shl 1) xor 0x07 else crc shl 1
-                crc = crc and 0xff
-            }
-        }
-        return crc.toByte()
-    }
-
-    /**
      * CRC-16 Modbus (used for WHOOP 5 / Maverick / Puffin header validation).
      * Polynomial 0xa001, initial value 0xffff.
      */

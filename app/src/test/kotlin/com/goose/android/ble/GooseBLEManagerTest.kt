@@ -291,6 +291,91 @@ class GooseBLEManagerTest {
             job.cancelAndJoin()
         }
 
+    // ---- vitals — initial state ----
+
+    @Test
+    fun initialVitals_allNull() {
+        assertNull(manager.liveHeartRate.value)
+        assertNull(manager.liveHRV.value)
+        assertNull(manager.restingHeartRate.value)
+    }
+
+    // ---- vitals — standard HR characteristic routing ----
+
+    @Test
+    fun standardHRNotification_updatesLiveHeartRate() =
+        managerScope.runTest {
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            every { char.uuid } returns java.util.UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
+            // flags=0x00 (8-bit HR, no RR), bpm=72
+            val hrPayload = byteArrayOf(0x00, 72)
+            gattCallback().onCharacteristicChanged(gatt, char, hrPayload)
+            advanceUntilIdle()
+
+            assertEquals(72, manager.liveHeartRate.value)
+        }
+
+    @Test
+    fun standardHRNotification_withRR_doesNotUpdateLiveHRV_untilChunkFilled() =
+        managerScope.runTest {
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            every { char.uuid } returns java.util.UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
+            // One HR notification with a single RR interval — chunk not yet full
+            // flags=0x10 (8-bit HR + RR), bpm=65, RR=1024 ticks (1000 ms)
+            val hrPayload = byteArrayOf(0x10, 65, 0x00, 0x04)
+            gattCallback().onCharacteristicChanged(gatt, char, hrPayload)
+            advanceUntilIdle()
+
+            assertEquals(65, manager.liveHeartRate.value)
+            assertNull(manager.liveHRV.value) // chunk not filled yet
+        }
+
+    @Test
+    fun nonStandardHRNotification_routedToFramesPipeline() =
+        managerScope.runTest {
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { manager.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
+
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            // Non-standard UUID → goes to WHOOP pipeline
+            every { char.uuid } returns java.util.UUID.fromString("fd4b0003-cce1-4033-93ce-002d5875f58a")
+
+            gattCallback().onCharacteristicChanged(gatt, char, "aa0108000001e67123019101363e5c8d".hexToBytes())
+            advanceUntilIdle()
+
+            assertEquals(1, collected.size) // parsed as WHOOP frame
+            assertNull(manager.liveHeartRate.value) // not a HR notification
+
+            job.cancelAndJoin()
+        }
+
+    // ---- vitals — reset on connect ----
+
+    @Test
+    fun connect_resetsVitals() =
+        managerScope.runTest {
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            every { char.uuid } returns java.util.UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
+            gattCallback().onCharacteristicChanged(gatt, char, byteArrayOf(0x00, 80))
+            advanceUntilIdle()
+            assertEquals(80, manager.liveHeartRate.value)
+
+            val device = mockk<android.bluetooth.BluetoothDevice>(relaxed = true)
+            every { device.connectGatt(any(), any(), any(), any()) } returns mockk(relaxed = true)
+            manager.connect(device)
+            advanceUntilIdle()
+
+            assertNull(manager.liveHeartRate.value)
+        }
+
     // ---- disconnect() ----
 
     @Test

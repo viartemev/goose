@@ -35,6 +35,8 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private val STANDARD_HR_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
 @Singleton
 class GooseBLEManager
     @Inject
@@ -49,6 +51,7 @@ class GooseBLEManager
         val connectionState: StateFlow<String> = _connectionState.asStateFlow()
 
         private val notificationPipeline = NotificationPipeline(managerScope)
+        private val vitalsProcessor = VitalsProcessor()
 
         /** Parsed WHOOP frames from incoming BLE notifications. */
         val frames: SharedFlow<WhoopFrame> get() = notificationPipeline.frames
@@ -56,10 +59,20 @@ class GooseBLEManager
         /** Notification chunks dropped due to back-pressure (best-effort). */
         val droppedNotificationCount: Long get() = notificationPipeline.droppedNotificationCount
 
+        /** Latest valid heart rate from the standard BLE HR characteristic (bpm). */
+        val liveHeartRate: StateFlow<Int?> get() = vitalsProcessor.liveHeartRate
+
+        /** Latest HRV RMSSD estimate derived from RR intervals (ms). */
+        val liveHRV: StateFlow<Double?> get() = vitalsProcessor.liveHRV
+
+        /** Resting HR estimate — low-quartile mean of the recent HR window (bpm). */
+        val restingHeartRate: StateFlow<Double?> get() = vitalsProcessor.restingHeartRate
+
         // Guarded by `this` — accessed from both GATT binder thread and callers
         private var activeGatt: BluetoothGatt? = null
         private var commandCharacteristic: BluetoothGattCharacteristic? = null
         private val pendingNotifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
+        @Volatile private var commandSequence: Byte = 0
 
         @Volatile private var autoReconnectDevice: BluetoothDevice? = null
 
@@ -144,7 +157,7 @@ class GooseBLEManager
                     characteristic: BluetoothGattCharacteristic,
                     value: ByteArray,
                 ) {
-                    notificationPipeline.push(value)
+                    handleCharacteristicChanged(characteristic.uuid, value)
                 }
 
                 @Deprecated("Deprecated in API 33")
@@ -154,7 +167,7 @@ class GooseBLEManager
                 ) {
                     @Suppress("DEPRECATION")
                     characteristic.value?.let { value ->
-                        onCharacteristicChanged(gatt, characteristic, value)
+                        handleCharacteristicChanged(characteristic.uuid, value)
                     }
                 }
             }
@@ -177,6 +190,7 @@ class GooseBLEManager
                 }
             }
             notificationPipeline.reset()
+            vitalsProcessor.reset()
             autoReconnectDevice = device
             _connectionState.value = "connecting"
             val gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -248,6 +262,33 @@ class GooseBLEManager
                 }
             }
 
+        /**
+         * Sends [command] to the connected WHOOP band.
+         * Returns true if the write was dispatched, false if not connected or no command characteristic.
+         */
+        @SuppressLint("MissingPermission")
+        @Suppress("DEPRECATION")
+        fun sendCommand(command: WhoopCommand): Boolean {
+            val (gatt, char) = synchronized(this) { activeGatt to commandCharacteristic }
+            if (gatt == null || char == null) return false
+
+            val seq = synchronized(this) {
+                val s = commandSequence
+                commandSequence = if (s == Byte.MAX_VALUE) 0 else (s + 1).toByte()
+                s
+            }
+            val frame = WhoopCommandBuilder.build(command, seq)
+
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                    BluetoothGatt.GATT_SUCCESS
+            } else {
+                char.value = frame
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                gatt.writeCharacteristic(char)
+            }
+        }
+
         /** Stops an active scan started via [scanFlow]. */
         @SuppressLint("MissingPermission")
         fun stopScan() {
@@ -286,10 +327,24 @@ class GooseBLEManager
                 .flatMap { it.characteristics ?: emptyList() }
                 .firstOrNull { c -> COMMAND_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid } }
 
-        private fun findNotificationCharacteristics(gatt: BluetoothGatt): List<BluetoothGattCharacteristic> =
-            gatt.services
-                .flatMap { it.characteristics ?: emptyList() }
-                .filter { c -> NOTIFICATION_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid } }
+        private fun findNotificationCharacteristics(gatt: BluetoothGatt): List<BluetoothGattCharacteristic> {
+            val allChars = gatt.services.flatMap { it.characteristics ?: emptyList() }
+            val whoopChars = allChars.filter { c ->
+                NOTIFICATION_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid }
+            }
+            val standardHRChar = allChars.firstOrNull { it.uuid == STANDARD_HR_UUID }
+            return if (standardHRChar != null) whoopChars + standardHRChar else whoopChars
+        }
+
+        private fun handleCharacteristicChanged(uuid: UUID, value: ByteArray) {
+            if (uuid == STANDARD_HR_UUID) {
+                val measurement = VitalsProcessor.parseStandardHRMeasurement(value) ?: return
+                vitalsProcessor.processHeartRate(measurement.first)
+                vitalsProcessor.processRRIntervals(measurement.second)
+            } else {
+                notificationPipeline.push(value)
+            }
+        }
 
         private fun scheduleReconnect(device: BluetoothDevice) {
             managerScope.launch {

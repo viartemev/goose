@@ -7,7 +7,7 @@ package com.goose.android.ble
  * Thread-unsafe — call from a single coroutine or wrap in synchronization.
  */
 internal class FrameAccumulator {
-    private val buffer = mutableListOf<Byte>()
+    private val buffer = ArrayDeque<Byte>()
 
     data class DeframeResult(
         val frames: List<ByteArray>,
@@ -30,7 +30,7 @@ internal class FrameAccumulator {
             if (buffer.size < expected) break
 
             frames.add(ByteArray(expected) { buffer[it] })
-            repeat(expected) { buffer.removeAt(0) }
+            repeat(expected) { buffer.removeFirst() }
             dropped += dropUntilFrameStart()
         }
 
@@ -70,7 +70,7 @@ internal class FrameAccumulator {
         return when {
             start == 0 -> 0
             start > 0 -> {
-                repeat(start) { buffer.removeAt(0) }
+                repeat(start) { buffer.removeFirst() }
                 start
             }
             else -> {

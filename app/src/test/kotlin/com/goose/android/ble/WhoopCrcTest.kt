@@ -4,18 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class WhoopCrcTest {
-    /** CRC-8 reference from Rust: crc8(&[0x01, 0x08, 0x00]) should match the GET_HELLO header byte */
-    @Test
-    fun crc8_knownValue() {
-        // Frame: aa 01 08 00 00 01 [crc16] ...
-        // Header CRC-16 is at bytes [6..7], not CRC-8. This test covers basic polynomial behavior.
-        val input = byteArrayOf(0x23.toByte(), 0x01.toByte())
-        val result = WhoopCrc.crc8(input)
-        // Verified against Rust: crc8(&[0x23, 0x01]) = specific value
-        // Just confirm it's deterministic and in byte range
-        assertEquals(result, WhoopCrc.crc8(input))
-    }
-
     /** CRC-16 Modbus: verify against the GET_HELLO fixture header. */
     @Test
     fun crc16_helloFrameHeader() {
