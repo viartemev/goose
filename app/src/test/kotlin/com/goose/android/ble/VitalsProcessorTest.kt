@@ -6,7 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import kotlin.math.abs
 
 class VitalsProcessorTest {
     private lateinit var processor: VitalsProcessor
@@ -68,11 +67,15 @@ class VitalsProcessorTest {
         // flags=0x10 (8-bit HR, RR), bpm=65, two RR intervals
         val rr1 = 0x0400 // 1024 ticks = 1000 ms
         val rr2 = 0x0800 // 2048 ticks = 2000 ms
-        val bytes = byteArrayOf(
-            0x10, 65,
-            (rr1 and 0xff).toByte(), (rr1 shr 8).toByte(),
-            (rr2 and 0xff).toByte(), (rr2 shr 8).toByte(),
-        )
+        val bytes =
+            byteArrayOf(
+                0x10,
+                65,
+                (rr1 and 0xff).toByte(),
+                (rr1 shr 8).toByte(),
+                (rr2 and 0xff).toByte(),
+                (rr2 shr 8).toByte(),
+            )
         val result = VitalsProcessor.parseStandardHRMeasurement(bytes)
         assertNotNull(result)
         assertEquals(2, result!!.second.size)

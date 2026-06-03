@@ -40,7 +40,7 @@ class NotificationPipelineTest {
     @Test
     fun push_singleCompleteFrame_emitsOneFrame() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle() // start consumer + collector before any push
@@ -52,6 +52,7 @@ class NotificationPipelineTest {
             assertTrue(collected[0] is WhoopFrame.Command)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- frame split across two pushes ----
@@ -59,7 +60,7 @@ class NotificationPipelineTest {
     @Test
     fun push_splitFrame_reassemblesAndEmitsAfterSecondPush() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -77,6 +78,7 @@ class NotificationPipelineTest {
             assertTrue(collected[0] is WhoopFrame.Command)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- two frames in one push ----
@@ -84,7 +86,7 @@ class NotificationPipelineTest {
     @Test
     fun push_twoFramesConcatenated_emitsBothFrames() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -97,6 +99,7 @@ class NotificationPipelineTest {
             assertTrue(collected[1] is WhoopFrame.Event)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- three distinct frame types ----
@@ -104,7 +107,7 @@ class NotificationPipelineTest {
     @Test
     fun push_allThreeFrameTypes_emittedInOrder() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -120,6 +123,7 @@ class NotificationPipelineTest {
             assertTrue(collected[2] is WhoopFrame.HistoricalData)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- empty push emits nothing ----
@@ -127,7 +131,7 @@ class NotificationPipelineTest {
     @Test
     fun push_emptyBytes_emitsNothing() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -138,6 +142,7 @@ class NotificationPipelineTest {
             assertTrue(collected.isEmpty())
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- garbage bytes increment parserDroppedByteCount ----
@@ -145,7 +150,7 @@ class NotificationPipelineTest {
     @Test
     fun push_garbageBytes_incrementsParserDroppedByteCount() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val job = launch { pipeline.frames.collect {} }
             advanceUntilIdle()
 
@@ -155,12 +160,13 @@ class NotificationPipelineTest {
             assertTrue(pipeline.parserDroppedByteCount > 0)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     @Test
     fun push_garbagePrefixThenValidFrame_dropsGarbageAndEmitsFrame() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -173,6 +179,7 @@ class NotificationPipelineTest {
             assertTrue(pipeline.parserDroppedByteCount >= 2)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- queue depth ----
@@ -180,8 +187,9 @@ class NotificationPipelineTest {
     @Test
     fun queueDepth_zeroInitially() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             assertEquals(0, pipeline.queueDepth)
+            pipeline.close()
         }
 
     @Test
@@ -204,8 +212,9 @@ class NotificationPipelineTest {
     @Test
     fun droppedNotificationCount_zeroInitially() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             assertEquals(0L, pipeline.droppedNotificationCount)
+            pipeline.close()
         }
 
     @Test
@@ -260,7 +269,7 @@ class NotificationPipelineTest {
     @Test
     fun reset_clearsPartialParserBuffer() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -279,6 +288,7 @@ class NotificationPipelineTest {
             assertEquals(1, collected.size)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- byte-by-byte accumulation ----
@@ -286,7 +296,7 @@ class NotificationPipelineTest {
     @Test
     fun push_byteByByte_reassemblesCompleteFrame() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -301,6 +311,7 @@ class NotificationPipelineTest {
             assertTrue(collected[0] is WhoopFrame.Command)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- frame field values ----
@@ -308,7 +319,7 @@ class NotificationPipelineTest {
     @Test
     fun emittedCommandFrame_hasCorrectFieldValues() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -325,12 +336,13 @@ class NotificationPipelineTest {
             assertTrue(frame.warnings.isEmpty())
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     @Test
     fun emittedEventFrame_hasCorrectFieldValues() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -346,12 +358,13 @@ class NotificationPipelineTest {
             assertTrue(frame.payloadCrcValid)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     @Test
     fun emittedHistoricalFrame_hasCorrectFieldValues() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val collected = mutableListOf<WhoopFrame>()
             val job = launch { pipeline.frames.collect { collected.add(it) } }
             advanceUntilIdle()
@@ -367,6 +380,7 @@ class NotificationPipelineTest {
             assertTrue(frame.payloadCrcValid)
 
             job.cancelAndJoin()
+            pipeline.close()
         }
 
     // ---- multiple subscribers ----
@@ -374,7 +388,7 @@ class NotificationPipelineTest {
     @Test
     fun frames_multipleCollectors_allReceiveSameFrames() =
         runTest {
-            val pipeline = NotificationPipeline(backgroundScope)
+            val pipeline = NotificationPipeline(this)
             val results1 = mutableListOf<WhoopFrame>()
             val results2 = mutableListOf<WhoopFrame>()
             val job1 = launch { pipeline.frames.collect { results1.add(it) } }
@@ -389,5 +403,6 @@ class NotificationPipelineTest {
 
             job1.cancelAndJoin()
             job2.cancelAndJoin()
+            pipeline.close()
         }
 }

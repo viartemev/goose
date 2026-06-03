@@ -2,11 +2,9 @@ package com.goose.android.ble
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WhoopCommandBuilderTest {
-
     // ---- Frame structure ----
 
     @Test

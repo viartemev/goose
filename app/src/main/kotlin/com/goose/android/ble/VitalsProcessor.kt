@@ -37,11 +37,15 @@ class VitalsProcessor {
     private var lastHRVPublishMs = 0L
 
     @Synchronized
-    fun processHeartRate(bpm: Int, nowMs: Long = System.currentTimeMillis()) {
+    fun processHeartRate(
+        bpm: Int,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
         if (bpm !in HR_MIN..HR_MAX) return
 
-        val shouldPublish = _liveHeartRate.value == null ||
-            nowMs - lastHRPublishMs >= HR_PUBLISH_INTERVAL_MS
+        val shouldPublish =
+            _liveHeartRate.value == null ||
+                nowMs - lastHRPublishMs >= HR_PUBLISH_INTERVAL_MS
         if (shouldPublish) {
             lastHRPublishMs = nowMs
             _liveHeartRate.value = bpm
@@ -51,7 +55,10 @@ class VitalsProcessor {
     }
 
     @Synchronized
-    fun processRRIntervals(intervalsMs: List<Double>, nowMs: Long = System.currentTimeMillis()) {
+    fun processRRIntervals(
+        intervalsMs: List<Double>,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
         val valid = intervalsMs.filter { it in RR_VALID_MIN..RR_VALID_MAX }
         if (valid.isEmpty()) return
 
@@ -59,15 +66,17 @@ class VitalsProcessor {
         rrIntervalChunkMs.addAll(valid)
 
         val chunkAge = nowMs - rrIntervalChunkStartMs!!
-        val shouldFinalize = rrIntervalChunkMs.size >= HRV_CHUNK_SIZE ||
-            (rrIntervalChunkMs.size >= HRV_MIN_RR_PER_CHUNK && chunkAge >= HRV_CHUNK_MAX_AGE_MS)
+        val shouldFinalize =
+            rrIntervalChunkMs.size >= HRV_CHUNK_SIZE ||
+                (rrIntervalChunkMs.size >= HRV_MIN_RR_PER_CHUNK && chunkAge >= HRV_CHUNK_MAX_AGE_MS)
         if (!shouldFinalize) return
 
-        val chunkRmssd = rmssdMs(rrIntervalChunkMs) ?: run {
-            rrIntervalChunkMs.clear()
-            rrIntervalChunkStartMs = null
-            return
-        }
+        val chunkRmssd =
+            rmssdMs(rrIntervalChunkMs) ?: run {
+                rrIntervalChunkMs.clear()
+                rrIntervalChunkStartMs = null
+                return
+            }
         val chunkRRCount = rrIntervalChunkMs.size
         rrIntervalChunkMs.clear()
         rrIntervalChunkStartMs = null
@@ -79,8 +88,9 @@ class VitalsProcessor {
         if (totalCount == 0) return
         val weightedRmssd = hrvRmssdSamples.sumOf { it.first * it.second } / totalCount
 
-        val shouldPublish = _liveHRV.value == null ||
-            nowMs - lastHRVPublishMs >= HRV_PUBLISH_INTERVAL_MS
+        val shouldPublish =
+            _liveHRV.value == null ||
+                nowMs - lastHRVPublishMs >= HRV_PUBLISH_INTERVAL_MS
         if (shouldPublish) {
             lastHRVPublishMs = nowMs
             _liveHRV.value = weightedRmssd
@@ -101,7 +111,10 @@ class VitalsProcessor {
         lastHRVPublishMs = 0L
     }
 
-    private fun processRestingHREstimate(bpm: Int, nowMs: Long) {
+    private fun processRestingHREstimate(
+        bpm: Int,
+        nowMs: Long,
+    ) {
         restingHRWindowBpm.add(bpm)
         while (restingHRWindowBpm.size > RESTING_HR_WINDOW_SIZE) restingHRWindowBpm.removeFirst()
         if (restingHRWindowBpm.size < RESTING_HR_MIN_SAMPLES) return
@@ -109,8 +122,9 @@ class VitalsProcessor {
         val estimate = lowQuartileMeanBpm(restingHRWindowBpm.toList())
         if (!estimate.isFinite() || estimate.roundToInt() !in HR_MIN..HR_MAX) return
 
-        val shouldPublish = _restingHeartRate.value == null ||
-            nowMs - lastRestingHRPublishMs >= RESTING_HR_PUBLISH_INTERVAL_MS
+        val shouldPublish =
+            _restingHeartRate.value == null ||
+                nowMs - lastRestingHRPublishMs >= RESTING_HR_PUBLISH_INTERVAL_MS
         if (!shouldPublish) return
 
         lastRestingHRPublishMs = nowMs

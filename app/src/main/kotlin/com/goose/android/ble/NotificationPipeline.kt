@@ -83,4 +83,9 @@ class NotificationPipeline(
         droppedAtomic.set(0)
         depthAtomic.set(0)
     }
+
+    /** Closes the channel so the consumer coroutine exits gracefully. */
+    fun close() {
+        channel.close()
+    }
 }

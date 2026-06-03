@@ -68,10 +68,16 @@ class GooseBLEManager
         /** Resting HR estimate — low-quartile mean of the recent HR window (bpm). */
         val restingHeartRate: StateFlow<Double?> get() = vitalsProcessor.restingHeartRate
 
+        /** Closes the notification pipeline's channel, allowing the consumer coroutine to exit. */
+        fun closePipeline() {
+            notificationPipeline.close()
+        }
+
         // Guarded by `this` — accessed from both GATT binder thread and callers
         private var activeGatt: BluetoothGatt? = null
         private var commandCharacteristic: BluetoothGattCharacteristic? = null
         private val pendingNotifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
+
         @Volatile private var commandSequence: Byte = 0
 
         @Volatile private var autoReconnectDevice: BluetoothDevice? = null
@@ -272,11 +278,12 @@ class GooseBLEManager
             val (gatt, char) = synchronized(this) { activeGatt to commandCharacteristic }
             if (gatt == null || char == null) return false
 
-            val seq = synchronized(this) {
-                val s = commandSequence
-                commandSequence = if (s == Byte.MAX_VALUE) 0 else (s + 1).toByte()
-                s
-            }
+            val seq =
+                synchronized(this) {
+                    val s = commandSequence
+                    commandSequence = if (s == Byte.MAX_VALUE) 0 else (s + 1).toByte()
+                    s
+                }
             val frame = WhoopCommandBuilder.build(command, seq)
 
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -329,14 +336,18 @@ class GooseBLEManager
 
         private fun findNotificationCharacteristics(gatt: BluetoothGatt): List<BluetoothGattCharacteristic> {
             val allChars = gatt.services.flatMap { it.characteristics ?: emptyList() }
-            val whoopChars = allChars.filter { c ->
-                NOTIFICATION_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid }
-            }
+            val whoopChars =
+                allChars.filter { c ->
+                    NOTIFICATION_CHARACTERISTIC_UUIDS.any { UUID.fromString(it) == c.uuid }
+                }
             val standardHRChar = allChars.firstOrNull { it.uuid == STANDARD_HR_UUID }
             return if (standardHRChar != null) whoopChars + standardHRChar else whoopChars
         }
 
-        private fun handleCharacteristicChanged(uuid: UUID, value: ByteArray) {
+        private fun handleCharacteristicChanged(
+            uuid: UUID,
+            value: ByteArray,
+        ) {
             if (uuid == STANDARD_HR_UUID) {
                 val measurement = VitalsProcessor.parseStandardHRMeasurement(value) ?: return
                 vitalsProcessor.processHeartRate(measurement.first)

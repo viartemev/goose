@@ -26,12 +26,16 @@ object WhoopCommandBuilder {
      * @param command  the command to encode
      * @param sequence monotonically incrementing byte, wraps at 255 → 0
      */
-    fun build(command: WhoopCommand, sequence: Byte): ByteArray {
-        var payload = mutableListOf(
-            WhoopFrameConstants.PACKET_TYPE_COMMAND,
-            sequence,
-            command.commandNumber,
-        )
+    fun build(
+        command: WhoopCommand,
+        sequence: Byte,
+    ): ByteArray {
+        var payload =
+            mutableListOf(
+                WhoopFrameConstants.PACKET_TYPE_COMMAND,
+                sequence,
+                command.commandNumber,
+            )
         payload.addAll(command.payload.toList())
 
         // Pad to 4-byte alignment
@@ -42,14 +46,15 @@ object WhoopCommandBuilder {
         val payloadCrc = WhoopCrc.crc32(payloadBytes)
         val declaredLen = (payloadBytes.size + 4).toUShort()
 
-        val header = byteArrayOf(
-            0xaa.toByte(),
-            0x01,
-            (declaredLen and 0xffU).toByte(),
-            ((declaredLen.toInt() shr 8) and 0xff).toByte(),
-            0x00,
-            0x01,
-        )
+        val header =
+            byteArrayOf(
+                0xaa.toByte(),
+                0x01,
+                (declaredLen and 0xffU).toByte(),
+                ((declaredLen.toInt() shr 8) and 0xff).toByte(),
+                0x00,
+                0x01,
+            )
         val headerCrc = WhoopCrc.crc16Modbus(header)
 
         return header +

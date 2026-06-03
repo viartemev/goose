@@ -59,20 +59,24 @@ sealed class WhoopCommand {
      * Set the band clock to [timestampSeconds] / [timestampSubseconds]
      * (split 32.32 fixed-point seconds since WHOOP epoch).
      */
-    class SetClock(timestampSeconds: UInt, timestampSubseconds: UInt) : WhoopCommand() {
+    class SetClock(
+        timestampSeconds: UInt,
+        timestampSubseconds: UInt,
+    ) : WhoopCommand() {
         override val commandNumber: Byte = 10
-        override val payload: ByteArray = run {
-            val buf = ByteArray(8)
-            buf[0] = (timestampSeconds and 0xffU).toByte()
-            buf[1] = ((timestampSeconds shr 8) and 0xffU).toByte()
-            buf[2] = ((timestampSeconds shr 16) and 0xffU).toByte()
-            buf[3] = ((timestampSeconds shr 24) and 0xffU).toByte()
-            buf[4] = (timestampSubseconds and 0xffU).toByte()
-            buf[5] = ((timestampSubseconds shr 8) and 0xffU).toByte()
-            buf[6] = ((timestampSubseconds shr 16) and 0xffU).toByte()
-            buf[7] = ((timestampSubseconds shr 24) and 0xffU).toByte()
-            buf
-        }
+        override val payload: ByteArray =
+            run {
+                val buf = ByteArray(8)
+                buf[0] = (timestampSeconds and 0xffU).toByte()
+                buf[1] = ((timestampSeconds shr 8) and 0xffU).toByte()
+                buf[2] = ((timestampSeconds shr 16) and 0xffU).toByte()
+                buf[3] = ((timestampSeconds shr 24) and 0xffU).toByte()
+                buf[4] = (timestampSubseconds and 0xffU).toByte()
+                buf[5] = ((timestampSubseconds shr 8) and 0xffU).toByte()
+                buf[6] = ((timestampSubseconds shr 16) and 0xffU).toByte()
+                buf[7] = ((timestampSubseconds shr 24) and 0xffU).toByte()
+                buf
+            }
         override val name: String = "SET_CLOCK"
     }
 

@@ -237,6 +237,7 @@ class GooseBLEManagerTest {
             assertTrue(collected[0] is WhoopFrame.Command)
 
             job.cancelAndJoin()
+            manager.closePipeline()
         }
 
     @Test
@@ -260,6 +261,7 @@ class GooseBLEManagerTest {
             assertEquals(1, collected.size)
 
             job.cancelAndJoin()
+            manager.closePipeline()
         }
 
     @Test
@@ -289,6 +291,7 @@ class GooseBLEManagerTest {
             assertEquals(1, collected.size)
 
             job.cancelAndJoin()
+            manager.closePipeline()
         }
 
     // ---- vitals — initial state ----
@@ -315,6 +318,7 @@ class GooseBLEManagerTest {
             advanceUntilIdle()
 
             assertEquals(72, manager.liveHeartRate.value)
+            manager.closePipeline()
         }
 
     @Test
@@ -332,6 +336,7 @@ class GooseBLEManagerTest {
 
             assertEquals(65, manager.liveHeartRate.value)
             assertNull(manager.liveHRV.value) // chunk not filled yet
+            manager.closePipeline()
         }
 
     @Test
@@ -353,6 +358,7 @@ class GooseBLEManagerTest {
             assertNull(manager.liveHeartRate.value) // not a HR notification
 
             job.cancelAndJoin()
+            manager.closePipeline()
         }
 
     // ---- vitals — reset on connect ----
@@ -374,6 +380,7 @@ class GooseBLEManagerTest {
             advanceUntilIdle()
 
             assertNull(manager.liveHeartRate.value)
+            manager.closePipeline()
         }
 
     // ---- disconnect() ----
