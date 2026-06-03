@@ -111,14 +111,17 @@ class WhoopFrameParserEdgeCaseTest {
     fun parse_commandResponse() {
         // Build a valid CommandResponse frame:
         // payload: [packetType=36, sequence, responseToCmd=0x91, originSeq=1, resultCode=0, data...]
-        val payload = byteArrayOf(
-            36.toByte(), // PACKET_TYPE_COMMAND_RESPONSE
-            9.toByte(),   // sequence
-            0x91.toByte(), // COMMAND_GET_HELLO
-            1.toByte(),    // origin_sequence
-            0.toByte(),    // result_code (success)
-            0xaa.toByte(), 0xbb.toByte(), 0xcc.toByte(),
-        )
+        val payload =
+            byteArrayOf(
+                36.toByte(), // PACKET_TYPE_COMMAND_RESPONSE
+                9.toByte(), // sequence
+                0x91.toByte(), // COMMAND_GET_HELLO
+                1.toByte(), // origin_sequence
+                0.toByte(), // result_code (success)
+                0xaa.toByte(),
+                0xbb.toByte(),
+                0xcc.toByte(),
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -139,11 +142,15 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_metadata() {
-        val payload = byteArrayOf(
-            49.toByte(), // PACKET_TYPE_METADATA
-            1.toByte(),   // sequence
-            0xde.toByte(), 0xad.toByte(), 0xbe.toByte(), 0xef.toByte(),
-        )
+        val payload =
+            byteArrayOf(
+                49.toByte(), // PACKET_TYPE_METADATA
+                1.toByte(), // sequence
+                0xde.toByte(),
+                0xad.toByte(),
+                0xbe.toByte(),
+                0xef.toByte(),
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -162,12 +169,15 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_commandWithExtraData() {
-        val payload = byteArrayOf(
-            35.toByte(),  // PACKET_TYPE_COMMAND
-            1.toByte(),   // sequence
-            0x92.toByte(), // some command (not GET_HELLO)
-            0x01.toByte(), 0x02.toByte(), 0x03.toByte(),
-        )
+        val payload =
+            byteArrayOf(
+                35.toByte(), // PACKET_TYPE_COMMAND
+                1.toByte(), // sequence
+                0x92.toByte(), // some command (not GET_HELLO)
+                0x01.toByte(),
+                0x02.toByte(),
+                0x03.toByte(),
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -183,11 +193,12 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_commandMinimalPayload() {
-        val payload = byteArrayOf(
-            35.toByte(), // PACKET_TYPE_COMMAND
-            1.toByte(),  // sequence
-            0x91.toByte(), // COMMAND_GET_HELLO
-        )
+        val payload =
+            byteArrayOf(
+                35.toByte(), // PACKET_TYPE_COMMAND
+                1.toByte(), // sequence
+                0x91.toByte(), // COMMAND_GET_HELLO
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -203,10 +214,11 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_commandTooShort_warns() {
-        val payload = byteArrayOf(
-            35.toByte(), // PACKET_TYPE_COMMAND
-            1.toByte(),  // sequence (only 2 bytes, no command byte)
-        )
+        val payload =
+            byteArrayOf(
+                35.toByte(), // PACKET_TYPE_COMMAND
+                1.toByte(), // sequence (only 2 bytes, no command byte)
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -220,12 +232,13 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_commandResponseTooShort_warns() {
-        val payload = byteArrayOf(
-            36.toByte(), // PACKET_TYPE_COMMAND_RESPONSE
-            1.toByte(),  // sequence
-            0x91.toByte(), // responseToCommand
-            1.toByte(),  // originSequence (only 4 bytes, missing resultCode)
-        )
+        val payload =
+            byteArrayOf(
+                36.toByte(), // PACKET_TYPE_COMMAND_RESPONSE
+                1.toByte(), // sequence
+                0x91.toByte(), // responseToCommand
+                1.toByte(), // originSequence (only 4 bytes, missing resultCode)
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -239,11 +252,13 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_eventTooShort_warns() {
-        val payload = byteArrayOf(
-            48.toByte(), // PACKET_TYPE_EVENT
-            2.toByte(),  // sequence
-            17.toByte(), 0.toByte(), // event ID (only 4 bytes total)
-        )
+        val payload =
+            byteArrayOf(
+                48.toByte(), // PACKET_TYPE_EVENT
+                2.toByte(), // sequence
+                17.toByte(),
+                0.toByte(), // event ID (only 4 bytes total)
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -257,10 +272,11 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_realtimeDataTooShort_warns() {
-        val payload = byteArrayOf(
-            40.toByte(), // PACKET_TYPE_REALTIME_DATA
-            1.toByte(),  // sequence + packetK (only 2 bytes, too short)
-        )
+        val payload =
+            byteArrayOf(
+                40.toByte(), // PACKET_TYPE_REALTIME_DATA
+                1.toByte(), // sequence + packetK (only 2 bytes, too short)
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -274,11 +290,12 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_puffinCommand_parsedAsCommand() {
-        val payload = byteArrayOf(
-            37.toByte(), // PACKET_TYPE_PUFFIN_COMMAND
-            1.toByte(),  // sequence
-            0x91.toByte(), // COMMAND_GET_HELLO
-        )
+        val payload =
+            byteArrayOf(
+                37.toByte(), // PACKET_TYPE_PUFFIN_COMMAND
+                1.toByte(), // sequence
+                0x91.toByte(), // COMMAND_GET_HELLO
+            )
         val frame = buildFrame(payload)
 
         val frames = parser.push(frame)
@@ -318,13 +335,20 @@ class WhoopFrameParserEdgeCaseTest {
         val payload = ByteArray(32)
         payload[0] = 40 // PACKET_TYPE_REALTIME_DATA
         payload[1] = 10 // packet_k
-        payload[2] = 1  // status_or_stream
+        payload[2] = 1 // status_or_stream
         // counter: LE u32 = 0x01020304 at offset 3
-        payload[3] = 0x04; payload[4] = 0x03; payload[5] = 0x02; payload[6] = 0x01
+        payload[3] = 0x04
+        payload[4] = 0x03
+        payload[5] = 0x02
+        payload[6] = 0x01
         // timestamp: LE u32 = 0x44332211 at offset 7
-        payload[7] = 0x11; payload[8] = 0x22; payload[9] = 0x33; payload[10] = 0x44
+        payload[7] = 0x11
+        payload[8] = 0x22
+        payload[9] = 0x33
+        payload[10] = 0x44
         // subseconds: LE u16 = 0x6655 at offset 11
-        payload[11] = 0x55; payload[12] = 0x66
+        payload[11] = 0x55
+        payload[12] = 0x66
         // body: put some bytes
         payload[13] = 0xde.toByte()
         payload[14] = 0xad.toByte()
@@ -384,13 +408,20 @@ class WhoopFrameParserEdgeCaseTest {
 
     @Test
     fun parse_command_truncated_nonStreamingType_returnsEmpty() {
-        val payload = byteArrayOf(
-            35.toByte(), // PACKET_TYPE_COMMAND
-            1.toByte(),  // sequence
-            0x91.toByte(), // COMMAND_GET_HELLO
-            0x01.toByte(), 0x02.toByte(), 0x03.toByte(), 0x04.toByte(),
-            0x05.toByte(), 0x06.toByte(), 0x07.toByte(), 0x08.toByte(),
-        )
+        val payload =
+            byteArrayOf(
+                35.toByte(), // PACKET_TYPE_COMMAND
+                1.toByte(), // sequence
+                0x91.toByte(), // COMMAND_GET_HELLO
+                0x01.toByte(),
+                0x02.toByte(),
+                0x03.toByte(),
+                0x04.toByte(),
+                0x05.toByte(),
+                0x06.toByte(),
+                0x07.toByte(),
+                0x08.toByte(),
+            )
         val fullFrame = buildFrame(payload)
         // Truncate significantly
         val truncated = fullFrame.sliceArray(0 until fullFrame.size / 2)
@@ -408,14 +439,23 @@ class WhoopFrameParserEdgeCaseTest {
     @Test
     fun parse_threeDifferentFrameTypes() {
         val hello = buildFrame(byteArrayOf(35, 1, 0x91.toByte()))
-        val event = buildFrame(
-            byteArrayOf(
-                48, 2, 17, 0, // event ID = 17 LE
-                4, 3, 2, 1,    // timestamp seconds LE
-                6, 5,           // timestamp subseconds LE
-                0xde.toByte(), 0xad.toByte(),
-            ),
-        )
+        val event =
+            buildFrame(
+                byteArrayOf(
+                    48,
+                    2,
+                    17,
+                    0, // event ID = 17 LE
+                    4,
+                    3,
+                    2,
+                    1, // timestamp seconds LE
+                    6,
+                    5, // timestamp subseconds LE
+                    0xde.toByte(),
+                    0xad.toByte(),
+                ),
+            )
         val metadata = buildFrame(byteArrayOf(49, 3, 0xbe.toByte(), 0xef.toByte()))
 
         val combined = hello + event + metadata

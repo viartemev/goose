@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ByteArrayExtensionsTest {
-
     // ---- toHex ----
 
     @Test
@@ -65,10 +64,12 @@ class ByteArrayExtensionsTest {
         // toLittleEndianBytes → readU32Le should match
         val original = 0xDEADBEEFu
         val le = original.toLittleEndianBytes()
-        val reconstructed = ((le[0].toInt() and 0xff).toUInt() or
-            ((le[1].toInt() and 0xff).toUInt() shl 8) or
-            ((le[2].toInt() and 0xff).toUInt() shl 16) or
-            ((le[3].toInt() and 0xff).toUInt() shl 24))
+        val reconstructed = (
+            (le[0].toInt() and 0xff).toUInt() or
+                ((le[1].toInt() and 0xff).toUInt() shl 8) or
+                ((le[2].toInt() and 0xff).toUInt() shl 16) or
+                ((le[3].toInt() and 0xff).toUInt() shl 24)
+        )
         assertEquals(original, reconstructed)
     }
 

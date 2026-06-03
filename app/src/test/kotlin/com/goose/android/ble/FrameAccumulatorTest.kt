@@ -161,9 +161,17 @@ class FrameAccumulatorTest {
     @Test
     fun declaredLengthTooLarge_bufferedUntilEnoughData() {
         // Frame with declared_len=100 (0x0064), but only 8 bytes available
-        val bytes = byteArrayOf(
-            0xaa.toByte(), 0x01, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00,
-        )
+        val bytes =
+            byteArrayOf(
+                0xaa.toByte(),
+                0x01,
+                0x64,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+            )
         val result = accumulator.feed(bytes)
         assertTrue(result.frames.isEmpty())
         assertEquals(8, result.bufferedLen)

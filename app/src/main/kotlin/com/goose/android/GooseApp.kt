@@ -1,6 +1,7 @@
 package com.goose.android
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -46,8 +47,8 @@ private fun AppShell() {
                     onTabSelected = { gooseNav.navigateToTab(it) },
                 )
             },
-        ) { _ ->
-            GooseNavGraph(gooseNav = gooseNav)
+        ) { innerPadding ->
+            GooseNavGraph(gooseNav = gooseNav, modifier = Modifier.padding(innerPadding))
         }
     }
 }

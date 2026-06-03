@@ -18,15 +18,15 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
+import com.goose.android.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
@@ -40,14 +40,21 @@ class GooseBLEManager
     @Inject
     constructor(
         @ApplicationContext private val context: Context,
+        @ApplicationScope private val managerScope: CoroutineScope,
     ) {
         private val bluetoothManager: BluetoothManager =
             context.getSystemService(BluetoothManager::class.java)
 
-        private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
         private val _connectionState = MutableStateFlow("disconnected")
         val connectionState: StateFlow<String> = _connectionState.asStateFlow()
+
+        private val notificationPipeline = NotificationPipeline(managerScope)
+
+        /** Parsed WHOOP frames from incoming BLE notifications. */
+        val frames: SharedFlow<WhoopFrame> get() = notificationPipeline.frames
+
+        /** Notification chunks dropped due to back-pressure (best-effort). */
+        val droppedNotificationCount: Long get() = notificationPipeline.droppedNotificationCount
 
         // Guarded by `this` — accessed from both GATT binder thread and callers
         private var activeGatt: BluetoothGatt? = null
@@ -137,7 +144,7 @@ class GooseBLEManager
                     characteristic: BluetoothGattCharacteristic,
                     value: ByteArray,
                 ) {
-                    // T-011: forward to frame parser and emit WhoopFrame
+                    notificationPipeline.push(value)
                 }
 
                 @Deprecated("Deprecated in API 33")
@@ -169,6 +176,7 @@ class GooseBLEManager
                     pendingNotifyQueue.clear()
                 }
             }
+            notificationPipeline.reset()
             autoReconnectDevice = device
             _connectionState.value = "connecting"
             val gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)

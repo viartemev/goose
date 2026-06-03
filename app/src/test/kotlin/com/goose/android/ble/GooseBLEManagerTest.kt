@@ -3,9 +3,9 @@ package com.goose.android.ble
 import android.Manifest
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
-import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
@@ -13,6 +13,14 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.unmockkAll
 import io.mockk.verify
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -22,19 +30,22 @@ import org.junit.Before
 import org.junit.Test
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class GooseBLEManagerTest {
-
     private lateinit var manager: GooseBLEManager
+    private lateinit var managerScope: TestScope
 
     @Before
     fun setUp() {
+        managerScope = TestScope(StandardTestDispatcher())
         val ctx = mockk<Context>(relaxed = true)
         every { ctx.getSystemService(BluetoothManager::class.java) } returns mockk(relaxed = true)
-        manager = GooseBLEManager(ctx)
+        manager = GooseBLEManager(ctx, managerScope.backgroundScope)
     }
 
     @After
     fun tearDown() {
+        managerScope.cancel()
         unmockkAll()
     }
 
@@ -162,10 +173,11 @@ class GooseBLEManagerTest {
     @Test
     fun onDescriptorWrite_afterOneNotifyChar_setsReady() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
-        val service = serviceWith(
-            commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
-            notifyCharWithCccd("fd4b0003-cce1-4033-93ce-002d5875f58a"),
-        )
+        val service =
+            serviceWith(
+                commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
+                notifyCharWithCccd("fd4b0003-cce1-4033-93ce-002d5875f58a"),
+            )
         every { gatt.services } returns listOf(service)
 
         gattCallback().onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
@@ -178,11 +190,12 @@ class GooseBLEManagerTest {
     @Test
     fun onDescriptorWrite_twoNotifyChars_setsReadyAfterSecond() {
         val gatt = mockk<BluetoothGatt>(relaxed = true)
-        val service = serviceWith(
-            commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
-            notifyCharWithCccd("fd4b0003-cce1-4033-93ce-002d5875f58a"),
-            notifyCharWithCccd("fd4b0004-cce1-4033-93ce-002d5875f58a"),
-        )
+        val service =
+            serviceWith(
+                commandChar("fd4b0002-cce1-4033-93ce-002d5875f58a"),
+                notifyCharWithCccd("fd4b0003-cce1-4033-93ce-002d5875f58a"),
+                notifyCharWithCccd("fd4b0004-cce1-4033-93ce-002d5875f58a"),
+            )
         every { gatt.services } returns listOf(service)
 
         gattCallback().onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
@@ -205,6 +218,78 @@ class GooseBLEManagerTest {
         // No descriptor write needed → state immediately "ready"
         assertEquals("ready", manager.connectionState.value)
     }
+
+    // ---- notification pipeline integration ----
+
+    @Test
+    fun onCharacteristicChanged_validFrame_emittedToFramesFlow() =
+        managerScope.runTest {
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { manager.frames.collect { collected.add(it) } }
+            advanceUntilIdle() // start consumer + collector, both suspend waiting
+
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            gattCallback().onCharacteristicChanged(gatt, char, "aa0108000001e67123019101363e5c8d".hexToBytes())
+            advanceUntilIdle()
+
+            assertEquals(1, collected.size)
+            assertTrue(collected[0] is WhoopFrame.Command)
+
+            job.cancelAndJoin()
+        }
+
+    @Test
+    fun onCharacteristicChanged_splitFrame_reassemblesAndEmits() =
+        managerScope.runTest {
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { manager.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
+
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            val bytes = "aa0108000001e67123019101363e5c8d".hexToBytes()
+            val mid = bytes.size / 2
+
+            gattCallback().onCharacteristicChanged(gatt, char, bytes.sliceArray(0 until mid))
+            advanceUntilIdle()
+            assertEquals(0, collected.size)
+
+            gattCallback().onCharacteristicChanged(gatt, char, bytes.sliceArray(mid until bytes.size))
+            advanceUntilIdle()
+            assertEquals(1, collected.size)
+
+            job.cancelAndJoin()
+        }
+
+    @Test
+    fun connect_resetsNotificationPipeline() =
+        managerScope.runTest {
+            val collected = mutableListOf<WhoopFrame>()
+            val job = launch { manager.frames.collect { collected.add(it) } }
+            advanceUntilIdle()
+
+            val gatt = mockk<BluetoothGatt>(relaxed = true)
+            val char = mockk<BluetoothGattCharacteristic>(relaxed = true)
+            val bytes = "aa0108000001e67123019101363e5c8d".hexToBytes()
+
+            // Push first half — accumulates in parser buffer
+            gattCallback().onCharacteristicChanged(gatt, char, bytes.sliceArray(0 until bytes.size / 2))
+            advanceUntilIdle()
+            assertEquals(0, collected.size)
+
+            // connect() resets the pipeline — stale partial bytes discarded
+            val device = mockk<android.bluetooth.BluetoothDevice>(relaxed = true)
+            every { device.connectGatt(any(), any(), any(), any()) } returns mockk(relaxed = true)
+            manager.connect(device)
+
+            // Full frame after reset — must emit exactly 1 (no corruption from prior partial)
+            gattCallback().onCharacteristicChanged(gatt, char, bytes)
+            advanceUntilIdle()
+            assertEquals(1, collected.size)
+
+            job.cancelAndJoin()
+        }
 
     // ---- disconnect() ----
 
@@ -232,7 +317,7 @@ class GooseBLEManagerTest {
         manager.disconnect() // clears activeGatt and autoReconnectDevice
 
         // Simulate callback from the now-orphaned gatt (activeGatt !== gatt → ownedGatt = false)
-        gattCallback().onConnectionStateChange(gatt, 133 /* GATT_INTERNAL_ERROR */, BluetoothProfile.STATE_DISCONNECTED)
+        gattCallback().onConnectionStateChange(gatt, 133, BluetoothProfile.STATE_DISCONNECTED) // GATT_INTERNAL_ERROR
 
         assertNull(getAutoReconnectDevice()) // still null — no reconnect was scheduled
     }
@@ -264,6 +349,15 @@ class GooseBLEManagerTest {
     }
 
     // ---- Mock builder helpers ----
+
+    // ---- Hex helper ----
+
+    private fun String.hexToBytes(): ByteArray {
+        val cleaned = replace(" ", "").replace("\n", "")
+        return ByteArray(cleaned.length / 2) { i ->
+            cleaned.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+        }
+    }
 
     /** Characteristic with no CCCD descriptor — simulates command chars or notify chars without CCC. */
     private fun commandChar(uuid: String): BluetoothGattCharacteristic {

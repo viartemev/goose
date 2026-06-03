@@ -1,11 +1,9 @@
 package com.goose.android.navigation
 
-import androidx.navigation.NavHostController
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class GooseNavControllerTest {
-
     @Test
     fun `navigateToTab sets route`() {
         // Verify GooseTab routes match expected values
